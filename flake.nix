@@ -28,14 +28,19 @@
         : "''${ARCHIVE_DEVICE:?ARCHIVE_DEVICE не задан}"
         : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
 
-        if findmnt -rn -M "$ARCHIVE_MOUNT_POINT" >/dev/null 2>&1; then
-          echo "Уже смонтировано в $ARCHIVE_MOUNT_POINT" >&2
-          exit 0
-        fi
+        subvols="@ingress @archive @live @snapshots"
 
-        sudo mkdir -p "$ARCHIVE_MOUNT_POINT"
-        sudo mount -t btrfs -o subvol=@archive "$ARCHIVE_DEVICE" "$ARCHIVE_MOUNT_POINT"
-        echo "Смонтировано $ARCHIVE_DEVICE (@archive) в $ARCHIVE_MOUNT_POINT"
+        for subvol in $subvols; do
+          mount_point="''$ARCHIVE_MOUNT_POINT/$subvol"
+          if findmnt -rn -M "$mount_point" >/dev/null 2>&1; then
+            echo "$subvol уже смонтировано в $mount_point" >&2
+            continue
+          fi
+
+          sudo mkdir -p "$mount_point"
+          sudo mount -t btrfs -o subvol="$subvol" "''$ARCHIVE_DEVICE" "$mount_point"
+          echo "Смонтировано ''$ARCHIVE_DEVICE ($subvol) в $mount_point"
+        done
       '';
     };
 
@@ -45,13 +50,15 @@
       text = ''
         : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
 
-        if ! findmnt -rn -M "$ARCHIVE_MOUNT_POINT" >/dev/null 2>&1; then
-          echo "Ничего не смонтировано в $ARCHIVE_MOUNT_POINT" >&2
-          exit 0
-        fi
+        subvols="@ingress @archive @live @snapshots"
 
-        sudo umount "$ARCHIVE_MOUNT_POINT"
-        echo "Размонтировано $ARCHIVE_MOUNT_POINT"
+        for subvol in $subvols; do
+          mount_point="''$ARCHIVE_MOUNT_POINT/$subvol"
+          if findmnt -rn -M "$mount_point" >/dev/null 2>&1; then
+            sudo umount "$mount_point"
+            echo "Размонтировано $mount_point"
+          fi
+        done
       '';
     };
   in {
@@ -90,6 +97,7 @@
     # ── devShell ────────────────────────────────────────────────────────
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs; [
+        opencode
         isync
         syncthing
         btrfs-progs

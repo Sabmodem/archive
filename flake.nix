@@ -1,3 +1,6 @@
+# Разметить диск: sudo nix run github:nix-community/disko -- --flake .#archive --argstr device /dev/loop1 --mode format
+# Активировать flake: ARCHIVE_MOUNT_POINT=/mnt/archive ARCHIVE_DEVICE=/dev/loop0p1 nix develop --command zsh
+
 {
   description = "Archive: disko + devShell с mbsync/syncthing/vscode";
 
@@ -29,6 +32,8 @@
         : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
 
         subvols="@ingress @archive @live @snapshots"
+        uid="$(id -u)"
+        gid="$(id -g)"
 
         for subvol in $subvols; do
           mount_point="''$ARCHIVE_MOUNT_POINT/$subvol"
@@ -39,7 +44,8 @@
 
           sudo mkdir -p "$mount_point"
           sudo mount -t btrfs -o subvol="$subvol" "''$ARCHIVE_DEVICE" "$mount_point"
-          echo "Смонтировано ''$ARCHIVE_DEVICE ($subvol) в $mount_point"
+          sudo chown "$uid:$gid" "$mount_point"
+          echo "Смонтировано ''$ARCHIVE_DEVICE ($subvol) в $mount_point (uid=$uid)"
         done
       '';
     };
@@ -61,6 +67,21 @@
         done
       '';
     };
+
+    syncthingArchive = pkgs.writeShellApplication {
+      name = "syncthing-archive";
+      runtimeInputs = with pkgs; [ syncthing coreutils ];
+      text = ''
+        : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
+        base="$ARCHIVE_MOUNT_POINT/@live/syncthing"
+        mkdir -p "$base/config" "$base/data"
+        exec syncthing \
+          --config "$base/config" \
+          --data   "$base/data" \
+          --no-browser "$@"
+      '';
+    };
+
   in {
     # ── disko ───────────────────────────────────────────────────────────
     # Остаётся функцией с параметром device.
@@ -91,6 +112,7 @@
     packages.${system} = {
       mount-archive  = mountArchive;
       umount-archive = umountArchive;
+      syncthing-archive = syncthingArchive;
       default        = mountArchive;
     };
 
@@ -105,6 +127,7 @@
         my-vscode
         mountArchive
         umountArchive
+        syncthingArchive
       ];
     };
   };

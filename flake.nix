@@ -20,74 +20,38 @@
         jnoortheen.nix-ide
       ];
     };
-
-    mbsyncrcTemplate = pkgs.writeText "mbsyncrc.template" ''
-      IMAPAccount work
-      Host imap.example.com
-      User me@example.com
-      PassCmd "secret-tool lookup service imap user me@example.com"
-      TLSType IMAPS
-
-      IMAPStore work-remote
-      Account work
-
-      MaildirStore work-local
-      Path __ARCHIVE__/archive/work/
-      Inbox __ARCHIVE__/archive/work/Inbox
-      SubFolders Verbatim
-
-      Channel work
-      Far :work-remote:
-      Near :work-local:
-      Patterns *
-      Create Both
-      Expunge Both
-      SyncState *
-    '';
-
-    syncthing-archive = pkgs.writeShellApplication {
-      name = "syncthing-archive";
-      runtimeInputs = [ pkgs.syncthing pkgs.coreutils ];
+    # ── утилиты монтирования ─────────────────────────────────────────────
+    mountArchive = pkgs.writeShellApplication {
+      name = "mount-archive";
+      runtimeInputs = with pkgs; [ btrfs-progs util-linux coreutils ];
       text = ''
-        : "''${ARCHIVE:?ARCHIVE is not set}"
-        ST_HOME="$ARCHIVE/live/syncthing"
-        mkdir -p "$ST_HOME"
-        exec syncthing -home "$ST_HOME" -no-browser -no-restart "$@"
+        : "''${ARCHIVE_DEVICE:?ARCHIVE_DEVICE не задан}"
+        : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
+
+        if findmnt -rn -M "$ARCHIVE_MOUNT_POINT" >/dev/null 2>&1; then
+          echo "Уже смонтировано в $ARCHIVE_MOUNT_POINT" >&2
+          exit 0
+        fi
+
+        sudo mkdir -p "$ARCHIVE_MOUNT_POINT"
+        sudo mount -t btrfs -o subvol=@archive "$ARCHIVE_DEVICE" "$ARCHIVE_MOUNT_POINT"
+        echo "Смонтировано $ARCHIVE_DEVICE (@archive) в $ARCHIVE_MOUNT_POINT"
       '';
     };
 
-    mbsync-archive = pkgs.writeShellApplication {
-      name = "mbsync-archive";
-      runtimeInputs = [ pkgs.isync pkgs.coreutils ];
+    umountArchive = pkgs.writeShellApplication {
+      name = "umount-archive";
+      runtimeInputs = with pkgs; [ util-linux coreutils ];
       text = ''
-        : "''${ARCHIVE:?ARCHIVE is not set}"
-        CFG="$ARCHIVE/live/mbsync/.mbsyncrc"
-        if [ ! -f "$CFG" ]; then
-          echo "no config at $CFG — run: archive-init" >&2
-          exit 1
-        fi
-        exec mbsync -c "$CFG" "$@"
-      '';
-    };
+        : "''${ARCHIVE_MOUNT_POINT:?ARCHIVE_MOUNT_POINT не задан}"
 
-    archive-init = pkgs.writeShellApplication {
-      name = "archive-init";
-      runtimeInputs = [ pkgs.coreutils pkgs.gnused ];
-      text = ''
-        : "''${ARCHIVE:?ARCHIVE is not set}"
-
-        mkdir -p "$ARCHIVE/live/mbsync" "$ARCHIVE/live/syncthing"
-
-        CFG="$ARCHIVE/live/mbsync/.mbsyncrc"
-        if [ ! -f "$CFG" ]; then
-          sed "s|__ARCHIVE__|$ARCHIVE|g" ${mbsyncrcTemplate} > "$CFG"
-          chmod 600 "$CFG"
-          echo "created $CFG"
-        else
-          echo "exists: $CFG"
+        if ! findmnt -rn -M "$ARCHIVE_MOUNT_POINT" >/dev/null 2>&1; then
+          echo "Ничего не смонтировано в $ARCHIVE_MOUNT_POINT" >&2
+          exit 0
         fi
 
-        echo "syncthing home: $ARCHIVE/live/syncthing"
+        sudo umount "$ARCHIVE_MOUNT_POINT"
+        echo "Размонтировано $ARCHIVE_MOUNT_POINT"
       '';
     };
   in {
@@ -117,35 +81,23 @@
       };
     };
 
+    packages.${system} = {
+      mount-archive  = mountArchive;
+      umount-archive = umountArchive;
+      default        = mountArchive;
+    };
+
     # ── devShell ────────────────────────────────────────────────────────
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs; [
-        isync syncthing btrfs-progs util-linux
+        isync
+        syncthing
+        btrfs-progs
+        util-linux
         my-vscode
-        archive-init syncthing-archive mbsync-archive
+        mountArchive
+        umountArchive
       ];
-      shellHook = ''
-        if [ -z "''${ARCHIVE:-}" ]; then
-          echo "warning: ARCHIVE not set; set it to the mounted archive root" >&2
-        else
-          export MBSYNC_CONFIG="$ARCHIVE/live/mbsync/.mbsyncrc"
-          export SYNCTHING_HOME="$ARCHIVE/live/syncthing"
-          echo "archive=$ARCHIVE"
-        fi
-      '';
-    };
-
-    # ── пакеты ──────────────────────────────────────────────────────────
-    packages.${system} = {
-      inherit mbsyncrcTemplate syncthing-archive mbsync-archive archive-init;
-    };
-
-    # ── nixosModules (опционально) ──────────────────────────────────────
-    nixosModules.syncthing-archive = { lib, ... }: {
-      imports = [ disko.nixosModules.disko ];
-      # ...
     };
   };
 }
-
-# TODO: one env var with the archive location, all scripts follow it. systemd unit for syncthing, proper naming of subvolumes

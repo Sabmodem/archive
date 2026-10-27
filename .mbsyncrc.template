@@ -1,0 +1,20 @@
+IMAPAccount archive
+Host imap.example.com
+User you@example.com
+PassCmd "age -d -i @HOME@/.config/age/keys.txt @ARCHIVE@/pass.age"
+TLSType IMAPS
+
+IMAPStore archive-remote
+Account archive
+
+MaildirStore archive-local
+Path @ARCHIVE@/Maildir/
+Inbox @ARCHIVE@/Maildir/INBOX
+SubFolders Verbatim
+
+Channel archive
+Far :archive-remote:
+Near :archive-local:
+Patterns *
+Create Both
+SyncState *
